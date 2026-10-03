@@ -1,0 +1,837 @@
+```html
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Câmera Web Pro</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        darkBg: '#0f0f11',
+                        darkCard: '#1a1a1e',
+                        accent: '#ff3b30',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #0d0d0f;
+            color: #f3f4f6;
+            font-family: 'Inter', sans-serif;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+            overflow: hidden;
+        }
+
+        /* Filtros CSS para o Video Feed */
+        .filter-normal { filter: none; }
+        .filter-bw { filter: grayscale(100%); }
+        .filter-sepia { filter: sepia(100%); }
+        .filter-vintage { filter: sepia(50%) contrast(120%) brightness(90%) hue-rotate(-15deg); }
+        .filter-inverted { filter: invert(100%); }
+        .filter-contrast { filter: contrast(180%) saturate(140%); }
+        .filter-warm { filter: sepia(30%) saturate(140%) hue-rotate(-10deg); }
+        .filter-cool { filter: hue-rotate(30deg) saturate(120%) brightness(105%); }
+
+        /* Animação do Flash ao Tirar Foto */
+        @keyframes cameraFlash {
+            0% { opacity: 0; }
+            50% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+        .flash-active {
+            animation: cameraFlash 0.25s ease-out forwards;
+        }
+
+        /* Esconder Scrollbar */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        /* Estilização da Câmera estilo App Nativo */
+        .shutter-btn-inner {
+            transition: transform 0.1s ease, background-color 0.2s ease;
+        }
+        .shutter-btn:active .shutter-btn-inner {
+            transform: scale(0.85);
+            background-color: #e53e3e;
+        }
+
+        /* Ajuste do aspect ratio do video para mobile */
+        .video-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .mirrored {
+            transform: scaleX(-1);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col justify-between overflow-hidden bg-black select-none">
+
+    <!-- Flash Overlay -->
+    <div id="flash-overlay" class="fixed inset-0 bg-white opacity-0 pointer-events-none z-50"></div>
+
+    <!-- Feedback Toast -->
+    <div id="toast" class="fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-gray-800/90 text-white px-4 py-2 rounded-full text-xs sm:text-sm font-medium opacity-0 transition-opacity duration-300 pointer-events-none backdrop-blur-md shadow-lg flex items-center gap-2 border border-white/10">
+        <i id="toast-icon" class="fas fa-info-circle"></i>
+        <span id="toast-message">Mensagem</span>
+    </div>
+
+    <!-- Contêiner Principal da Câmera -->
+    <main class="relative flex-1 w-full h-full flex flex-col justify-between overflow-hidden">
+        
+        <!-- Top Bar Control -->
+        <header class="absolute top-0 left-0 right-0 z-20 flex justify-between items-center p-4 bg-gradient-to-b from-black/70 to-transparent">
+            <!-- Timer Quick Toggle -->
+            <button id="timer-toggle-btn" class="w-10 h-10 rounded-full bg-black/40 backdrop-blur-md border border-white/20 text-white flex items-center justify-center hover:bg-black/60 active:scale-95 transition">
+                <span id="timer-icon-text" class="text-xs font-bold">OFF</span>
+            </button>
+
+            <!-- Sound Toggle -->
+            <button id="sound-btn" class="w-10 h-10 rounded-full bg-black/40 backdrop-blur-md border border-white/20 text-white flex items-center justify-center hover:bg-black/60 active:scale-95 transition">
+                <i id="sound-icon" class="fas fa-volume-up text-sm"></i>
+            </button>
+
+            <!-- Grid Overlay Toggle -->
+            <button id="grid-btn" class="w-10 h-10 rounded-full bg-black/40 backdrop-blur-md border border-white/20 text-white flex items-center justify-center hover:bg-black/60 active:scale-95 transition">
+                <i id="grid-icon" class="fas fa-border-all text-sm opacity-60"></i>
+            </button>
+
+            <!-- Flip Camera (Desktop/Mobile) -->
+            <button id="switch-camera-btn" class="w-10 h-10 rounded-full bg-black/40 backdrop-blur-md border border-white/20 text-white flex items-center justify-center hover:bg-black/60 active:scale-95 transition">
+                <i class="fas fa-sync-alt text-sm"></i>
+            </button>
+        </header>
+
+        <!-- Camera Viewport -->
+        <div class="video-container relative flex-1 overflow-hidden">
+            <!-- Video Feed -->
+            <video id="webcam" autoplay playsinline class="filter-normal mirrored"></video>
+
+            <!-- Grid Lines Overlay -->
+            <div id="grid-overlay" class="absolute inset-0 pointer-events-none hidden grid-cols-3 grid-rows-3 border-collapse">
+                <div class="border-r border-b border-white/20"></div>
+                <div class="border-r border-b border-white/20"></div>
+                <div class="border-b border-white/20"></div>
+                <div class="border-r border-b border-white/20"></div>
+                <div class="border-r border-b border-white/20"></div>
+                <div class="border-b border-white/20"></div>
+                <div class="border-r border-white/20"></div>
+                <div class="border-r border-white/20"></div>
+                <div></div>
+            </div>
+
+            <!-- Timer Countdown Overlay Display -->
+            <div id="countdown-overlay" class="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-sm hidden pointer-events-none z-30">
+                <span id="countdown-number" class="text-8xl font-extrabold text-white animate-ping">3</span>
+            </div>
+
+            <!-- Mensagem de Erro ou Permissão -->
+            <div id="camera-error" class="absolute inset-0 bg-darkBg/95 flex flex-col items-center justify-center p-6 text-center hidden z-40">
+                <i class="fas fa-camera-retro text-5xl text-gray-500 mb-4"></i>
+                <h2 class="text-xl font-bold mb-2 text-white">Acesso à Câmera Bloqueado</h2>
+                <p class="text-sm text-gray-400 mb-6 max-w-xs">Permita o acesso à câmera no seu navegador para começar a tirar fotos.</p>
+                <button id="retry-camera-btn" class="bg-red-600 hover:bg-red-700 text-white px-6 py-2.5 rounded-full font-medium transition active:scale-95">
+                    Tentar Novamente
+                </button>
+            </div>
+        </div>
+
+        <!-- Controls & Filters Section -->
+        <div class="relative z-20 bg-gradient-to-t from-black via-black/80 to-transparent pt-4 pb-6 flex flex-col items-center gap-4">
+            
+            <!-- Filter Selector (Horizontal Scroll) -->
+            <div class="w-full px-4 overflow-x-auto no-scrollbar flex items-center gap-3 justify-start sm:justify-center">
+                <button data-filter="normal" class="filter-btn active-filter px-3 py-1.5 rounded-full bg-white/20 text-white text-xs font-semibold whitespace-nowrap border border-white/40 transition">
+                    Normal
+                </button>
+                <button data-filter="bw" class="filter-btn px-3 py-1.5 rounded-full bg-black/40 text-gray-300 text-xs font-semibold whitespace-nowrap border border-white/10 transition">
+                    P&B
+                </button>
+                <button data-filter="sepia" class="filter-btn px-3 py-1.5 rounded-full bg-black/40 text-gray-300 text-xs font-semibold whitespace-nowrap border border-white/10 transition">
+                    Sépia
+                </button>
+                <button data-filter="vintage" class="filter-btn px-3 py-1.5 rounded-full bg-black/40 text-gray-300 text-xs font-semibold whitespace-nowrap border border-white/10 transition">
+                    Vintage
+                </button>
+                <button data-filter="inverted" class="filter-btn px-3 py-1.5 rounded-full bg-black/40 text-gray-300 text-xs font-semibold whitespace-nowrap border border-white/10 transition">
+                    Invertido
+                </button>
+                <button data-filter="contrast" class="filter-btn px-3 py-1.5 rounded-full bg-black/40 text-gray-300 text-xs font-semibold whitespace-nowrap border border-white/10 transition">
+                    Alto Contraste
+                </button>
+                <button data-filter="warm" class="filter-btn px-3 py-1.5 rounded-full bg-black/40 text-gray-300 text-xs font-semibold whitespace-nowrap border border-white/10 transition">
+                    Quente
+                </button>
+                <button data-filter="cool" class="filter-btn px-3 py-1.5 rounded-full bg-black/40 text-gray-300 text-xs font-semibold whitespace-nowrap border border-white/10 transition">
+                    Frio
+                </button>
+            </div>
+
+            <!-- Bottom Main Shutter Controls -->
+            <div class="w-full max-w-md px-8 flex items-center justify-between mt-2">
+                <!-- Thumbnail Preview Button -->
+                <button id="open-gallery-btn" class="w-12 h-12 rounded-xl bg-gray-800 border-2 border-white/40 overflow-hidden relative flex items-center justify-center group active:scale-95 transition">
+                    <img id="latest-thumb" src="https://placehold.co/100x100/1a1a1e/ffffff?text=Galeria" class="w-full h-full object-cover hidden" alt="Última foto">
+                    <i id="gallery-empty-icon" class="fas fa-images text-gray-400 text-lg"></i>
+                </button>
+
+                <!-- Shutter Button -->
+                <button id="shutter-btn" class="shutter-btn relative w-20 h-20 rounded-full border-4 border-white flex items-center justify-center p-1 active:scale-95 transition">
+                    <div class="shutter-btn-inner w-full h-full bg-white rounded-full"></div>
+                </button>
+
+                <!-- Mode/Option Button (Fotobooth/Quick Timer) -->
+                <button id="booth-mode-btn" class="w-12 h-12 rounded-full bg-white/10 border border-white/20 flex flex-col items-center justify-center text-white active:scale-95 transition hover:bg-white/20" title="Modo Quatro Fotos">
+                    <i class="fas fa-table-cells-large text-base"></i>
+                    <span class="text-[9px] font-bold mt-0.5">4-GRID</span>
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal da Galeria -->
+    <div id="gallery-modal" class="fixed inset-0 bg-darkBg z-50 flex flex-col translate-y-full transition-transform duration-300 ease-in-out">
+        <!-- Top Gallery Bar -->
+        <div class="p-4 flex items-center justify-between border-b border-white/10 bg-black/50 backdrop-blur-md">
+            <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                <i class="fas fa-photo-film text-red-500"></i> Suas Fotos
+            </h2>
+            <button id="close-gallery-btn" class="w-9 h-9 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <!-- Gallery Grid -->
+        <div id="gallery-grid" class="flex-1 overflow-y-auto p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            <!-- Fotos renderizadas via JS -->
+        </div>
+
+        <!-- Empty State -->
+        <div id="gallery-empty-state" class="flex-1 flex flex-col items-center justify-center p-6 text-center">
+            <div class="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mb-4 text-gray-500">
+                <i class="fas fa-camera text-3xl"></i>
+            </div>
+            <p class="text-base font-semibold text-gray-300">Nenhuma foto tirada ainda</p>
+            <p class="text-xs text-gray-500 mt-1">Sua galeria de fotos temporária aparecerá aqui.</p>
+        </div>
+    </div>
+
+    <!-- Fullscreen Photo Viewer Modal -->
+    <div id="viewer-modal" class="fixed inset-0 bg-black z-50 flex flex-col hidden">
+        <!-- Viewer Top Actions -->
+        <div class="p-4 flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent absolute top-0 left-0 right-0 z-10">
+            <button id="close-viewer-btn" class="w-10 h-10 rounded-full bg-black/40 text-white flex items-center justify-center backdrop-blur-md border border-white/10">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+
+            <div class="flex items-center gap-3">
+                <button id="share-photo-btn" class="w-10 h-10 rounded-full bg-black/40 text-white flex items-center justify-center backdrop-blur-md border border-white/10 hover:bg-black/60">
+                    <i class="fas fa-share-alt"></i>
+                </button>
+                <button id="download-photo-btn" class="w-10 h-10 rounded-full bg-black/40 text-white flex items-center justify-center backdrop-blur-md border border-white/10 hover:bg-black/60">
+                    <i class="fas fa-download"></i>
+                </button>
+                <button id="delete-photo-btn" class="w-10 h-10 rounded-full bg-red-600/80 text-white flex items-center justify-center backdrop-blur-md hover:bg-red-600">
+                    <i class="fas fa-trash-alt"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Image Container -->
+        <div class="flex-1 flex items-center justify-center p-2 relative overflow-hidden">
+            <img id="full-photo-img" src="" class="max-w-full max-h-full object-contain rounded-lg shadow-2xl" alt="Foto capturada">
+        </div>
+    </div>
+
+    <!-- Canvas Escondido para Processar Captura de Imagem -->
+    <canvas id="capture-canvas" class="hidden"></canvas>
+
+    <script>
+        /**
+         * APLICATIVO DE CÂMERA WEB RESPONSIVO
+         * Gerenciamento de Stream, IndexedDB, Filtros em Canvas, Som e Animações.
+         */
+
+        // State Global
+        const state = {
+            stream: null,
+            facingMode: 'user', // 'user' ou 'environment'
+            currentFilter: 'normal',
+            timerDuration: 0, // 0, 3, 5, 10
+            soundEnabled: true,
+            gridEnabled: false,
+            photoboothMode: false,
+            photos: [],
+            selectedPhotoId: null,
+            db: null
+        };
+
+        // DOM Elements
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('capture-canvas');
+        const shutterBtn = document.getElementById('shutter-btn');
+        const switchCamBtn = document.getElementById('switch-camera-btn');
+        const filterBtns = document.querySelectorAll('.filter-btn');
+        const timerToggleBtn = document.getElementById('timer-toggle-btn');
+        const timerIconText = document.getElementById('timer-icon-text');
+        const soundBtn = document.getElementById('sound-btn');
+        const soundIcon = document.getElementById('sound-icon');
+        const gridBtn = document.getElementById('grid-btn');
+        const gridIcon = document.getElementById('grid-icon');
+        const gridOverlay = document.getElementById('grid-overlay');
+        const flashOverlay = document.getElementById('flash-overlay');
+        const cameraError = document.getElementById('camera-error');
+        const retryCameraBtn = document.getElementById('retry-camera-btn');
+        const countdownOverlay = document.getElementById('countdown-overlay');
+        const countdownNumber = document.getElementById('countdown-number');
+        const boothModeBtn = document.getElementById('booth-mode-btn');
+
+        // Gallery & Viewer Elements
+        const openGalleryBtn = document.getElementById('open-gallery-btn');
+        const closeGalleryBtn = document.getElementById('close-gallery-btn');
+        const galleryModal = document.getElementById('gallery-modal');
+        const galleryGrid = document.getElementById('gallery-grid');
+        const galleryEmptyState = document.getElementById('gallery-empty-state');
+        const latestThumb = document.getElementById('latest-thumb');
+        const galleryEmptyIcon = document.getElementById('gallery-empty-icon');
+
+        const viewerModal = document.getElementById('viewer-modal');
+        const fullPhotoImg = document.getElementById('full-photo-img');
+        const closeViewerBtn = document.getElementById('close-viewer-btn');
+        const deletePhotoBtn = document.getElementById('delete-photo-btn');
+        const downloadPhotoBtn = document.getElementById('download-photo-btn');
+        const sharePhotoBtn = document.getElementById('share-photo-btn');
+
+        // Toast
+        const toast = document.getElementById('toast');
+        const toastMessage = document.getElementById('toast-message');
+
+        function initIndexedDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open('CameraAppDB', 1);
+
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('photos')) {
+                        db.createObjectStore('photos', { keyPath: 'id' });
+                    }
+                };
+
+                request.onsuccess = (e) => {
+                    state.db = e.target.result;
+                    loadPhotosFromDB();
+                    resolve();
+                };
+
+                request.onerror = (e) => {
+                    console.error("Erro no IndexedDB:", e);
+                    reject(e);
+                };
+            });
+        }
+
+        function savePhotoToDB(photoObj) {
+            if (!state.db) return;
+            const transaction = state.db.transaction(['photos'], 'readwrite');
+            const store = transaction.objectStore('photos');
+            store.add(photoObj);
+
+            transaction.onsuccess = () => {
+                state.photos.unshift(photoObj);
+                updateGalleryUI();
+            };
+        }
+
+        function loadPhotosFromDB() {
+            if (!state.db) return;
+            const transaction = state.db.transaction(['photos'], 'readonly');
+            const store = transaction.objectStore('photos');
+            const request = store.getAll();
+
+            request.onsuccess = () => {
+                state.photos = request.result.sort((a, b) => b.timestamp - a.timestamp);
+                updateGalleryUI();
+            };
+        }
+
+        function deletePhotoFromDB(id) {
+            if (!state.db) return;
+            const transaction = state.db.transaction(['photos'], 'readwrite');
+            const store = transaction.objectStore('photos');
+            store.delete(id);
+
+            transaction.onsuccess = () => {
+                state.photos = state.photos.filter(p => p.id !== id);
+                updateGalleryUI();
+                closeViewer();
+                showToast("Foto excluída com sucesso");
+            };
+        }
+
+        function playShutterSound() {
+            if (!state.soundEnabled) return;
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(800, ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.08);
+
+                gain.gain.setValueAtTime(0.3, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
+
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+
+                osc.start();
+                osc.stop(ctx.currentTime + 0.08);
+            } catch (e) {
+                console.log("Audio de clique não suportado:", e);
+            }
+        }
+
+        async function startCamera() {
+            if (state.stream) {
+                state.stream.getTracks().forEach(track => track.stop());
+            }
+
+            const constraints = {
+                audio: false,
+                video: {
+                    facingMode: state.facingMode,
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 }
+                }
+            };
+
+            try {
+                state.stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = state.stream;
+                cameraError.classList.add('hidden');
+
+                // Ajustar espelhamento conforme modo frontal/traseiro
+                if (state.facingMode === 'user') {
+                    video.classList.add('mirrored');
+                } else {
+                    video.classList.remove('mirrored');
+                }
+            } catch (err) {
+                console.error("Erro ao acessar a câmera: ", err);
+                cameraError.classList.remove('hidden');
+            }
+        }
+
+        function switchCamera() {
+            state.facingMode = state.facingMode === 'user' ? 'environment' : 'user';
+            startCamera();
+            showToast(`Câmera ${state.facingMode === 'user' ? 'Frontal' : 'Traseira'}`);
+        }
+
+        function setFilter(filterName) {
+            state.currentFilter = filterName;
+            
+            // Remover todas as classes de filtro
+            video.className = video.className.replace(/filter-\w+/g, '');
+            video.classList.add(`filter-${filterName}`);
+
+            // Atualizar UI dos Botões
+            filterBtns.forEach(btn => {
+                if (btn.dataset.filter === filterName) {
+                    btn.classList.add('bg-white/20', 'text-white', 'border-white/40');
+                    btn.classList.remove('bg-black/40', 'text-gray-300', 'border-white/10');
+                } else {
+                    btn.classList.remove('bg-white/20', 'text-white', 'border-white/40');
+                    btn.classList.add('bg-black/40', 'text-gray-300', 'border-white/10');
+                }
+            });
+        }
+
+        function getCanvasFilterStyle(filter) {
+            switch(filter) {
+                case 'bw': return 'grayscale(100%)';
+                case 'sepia': return 'sepia(100%)';
+                case 'vintage': return 'sepia(50%) contrast(120%) brightness(90%) hue-rotate(-15deg)';
+                case 'inverted': return 'invert(100%)';
+                case 'contrast': return 'contrast(180%) saturate(140%)';
+                case 'warm': return 'sepia(30%) saturate(140%) hue-rotate(-10deg)';
+                case 'cool': return 'hue-rotate(30deg) saturate(120%) brightness(105%)';
+                default: return 'none';
+            }
+        }
+
+        function captureSinglePhoto() {
+            if (!state.stream) return;
+
+            // Feedback Visual Flash & Som
+            flashOverlay.classList.add('flash-active');
+            setTimeout(() => flashOverlay.classList.remove('flash-active'), 250);
+            playShutterSound();
+
+            if (navigator.vibrate) {
+                navigator.vibrate(50);
+            }
+
+            const videoWidth = video.videoWidth || 640;
+            const videoHeight = video.videoHeight || 480;
+
+            canvas.width = videoWidth;
+            canvas.height = videoHeight;
+
+            const ctx = canvas.getContext('2d');
+
+            // Salvar estado do canvas
+            ctx.save();
+
+            // Espelhar horizontalmente se for câmera frontal
+            if (state.facingMode === 'user') {
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+            }
+
+            // Aplicar Filtro no Contexto 2D
+            ctx.filter = getCanvasFilterStyle(state.currentFilter);
+
+            // Desenhar a imagem do vídeo no canvas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+
+            const photoObj = {
+                id: 'photo_' + Date.now(),
+                dataUrl: dataUrl,
+                timestamp: Date.now()
+            };
+
+            savePhotoToDB(photoObj);
+            showToast("Foto capturada!");
+        }
+
+        async function capturePhotobooth() {
+            const photosData = [];
+            showToast("Modo Fotobooth: 4 fotos serão tiradas!");
+
+            for (let i = 0; i < 4; i++) {
+                // Pequena contagem regressiva para cada foto
+                for (let c = 2; c > 0; c--) {
+                    countdownNumber.textContent = c;
+                    countdownOverlay.classList.remove('hidden');
+                    await new Promise(r => setTimeout(r, 600));
+                }
+                countdownOverlay.classList.add('hidden');
+
+                // Flash & Som
+                flashOverlay.classList.add('flash-active');
+                setTimeout(() => flashOverlay.classList.remove('flash-active'), 200);
+                playShutterSound();
+
+                // Captura temporária
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = video.videoWidth || 640;
+                tempCanvas.height = video.videoHeight || 480;
+                const tempCtx = tempCanvas.getContext('2d');
+
+                tempCtx.save();
+                if (state.facingMode === 'user') {
+                    tempCtx.translate(tempCanvas.width, 0);
+                    tempCtx.scale(-1, 1);
+                }
+                tempCtx.filter = getCanvasFilterStyle(state.currentFilter);
+                tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+                tempCtx.restore();
+
+                photosData.push(tempCanvas);
+
+                if (i < 3) {
+                    await new Promise(r => setTimeout(r, 800));
+                }
+            }
+
+            // Montar Grid 2x2 no Canvas Final
+            const singleW = photosData[0].width;
+            const singleH = photosData[0].height;
+            const padding = 20;
+
+            canvas.width = (singleW * 2) + (padding * 3);
+            canvas.height = (singleH * 2) + (padding * 3);
+
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Posicionar as 4 fotos
+            ctx.drawImage(photosData[0], padding, padding);
+            ctx.drawImage(photosData[1], singleW + (padding * 2), padding);
+            ctx.drawImage(photosData[2], padding, singleH + (padding * 2));
+            ctx.drawImage(photosData[3], singleW + (padding * 2), singleH + (padding * 2));
+
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+            const photoObj = {
+                id: 'photo_booth_' + Date.now(),
+                dataUrl: dataUrl,
+                timestamp: Date.now()
+            };
+
+            savePhotoToDB(photoObj);
+            showToast("Fotobooth completo criado!");
+        }
+
+        function handleShutterClick() {
+            if (state.photoboothMode) {
+                capturePhotobooth();
+                return;
+            }
+
+            if (state.timerDuration > 0) {
+                let count = state.timerDuration;
+                countdownNumber.textContent = count;
+                countdownOverlay.classList.remove('hidden');
+
+                const timerInterval = setInterval(() => {
+                    count--;
+                    if (count > 0) {
+                        countdownNumber.textContent = count;
+                    } else {
+                        clearInterval(timerInterval);
+                        countdownOverlay.classList.add('hidden');
+                        captureSinglePhoto();
+                    }
+                }, 1000);
+            } else {
+                captureSinglePhoto();
+            }
+        }
+
+        function updateGalleryUI() {
+            galleryGrid.innerHTML = '';
+
+            if (state.photos.length === 0) {
+                galleryEmptyState.classList.remove('hidden');
+                latestThumb.classList.add('hidden');
+                galleryEmptyIcon.classList.remove('hidden');
+                return;
+            }
+
+            galleryEmptyState.classList.add('hidden');
+
+            // Atualizar Thumbnail da Câmera
+            latestThumb.src = state.photos[0].dataUrl;
+            latestThumb.classList.remove('hidden');
+            galleryEmptyIcon.classList.add('hidden');
+
+            // Renderizar Grid de Fotos
+            state.photos.forEach(photo => {
+                const item = document.createElement('div');
+                item.className = 'relative aspect-square rounded-lg overflow-hidden bg-gray-900 border border-white/10 group cursor-pointer active:scale-95 transition';
+                item.innerHTML = `
+                    <img src="${photo.dataUrl}" class="w-full h-full object-cover" alt="Foto da galeria" loading="lazy">
+                    <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <i class="fas fa-expand text-white text-lg"></i>
+                    </div>
+                `;
+                item.addEventListener('click', () => openViewer(photo.id));
+                galleryGrid.appendChild(item);
+            });
+        }
+
+        function openViewer(photoId) {
+            const photo = state.photos.find(p => p.id === photoId);
+            if (!photo) return;
+
+            state.selectedPhotoId = photoId;
+            fullPhotoImg.src = photo.dataUrl;
+            viewerModal.classList.remove('hidden');
+        }
+
+        function closeViewer() {
+            viewerModal.classList.add('hidden');
+            state.selectedPhotoId = null;
+        }
+
+        function downloadCurrentPhoto() {
+            const photo = state.photos.find(p => p.id === state.selectedPhotoId);
+            if (!photo) return;
+
+            const link = document.createElement('a');
+            link.href = photo.dataUrl;
+            link.download = `foto_camera_${Date.now()}.jpg`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            showToast("Download iniciado!");
+        }
+
+        async function shareCurrentPhoto() {
+            const photo = state.photos.find(p => p.id === state.selectedPhotoId);
+            if (!photo) return;
+
+            try {
+                const response = await fetch(photo.dataUrl);
+                const blob = await response.blob();
+                const file = new File([blob], `foto_${Date.now()}.jpg`, { type: 'image/jpeg' });
+
+                if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        title: 'Minha Foto',
+                        text: 'Confira a foto que tirei na Câmera Web Pro!',
+                        files: [file]
+                    });
+                    showToast("Compartilhado com sucesso!");
+                } else {
+                    // Fallback para Clipboard
+                    document.execCommand('copy');
+                    showToast("Suporte a compartilhamento direto indisponível");
+                }
+            } catch (e) {
+                console.error("Erro ao compartilhar:", e);
+            }
+        }
+
+        function showToast(msg) {
+            toastMessage.textContent = msg;
+            toast.classList.remove('opacity-0');
+            toast.classList.add('opacity-100');
+
+            setTimeout(() => {
+                toast.classList.remove('opacity-100');
+                toast.classList.add('opacity-0');
+            }, 2500);
+        }
+
+        function setupEventListeners() {
+            // Disparador principal
+            shutterBtn.addEventListener('click', handleShutterClick);
+
+            // Troca de Câmera
+            switchCamBtn.addEventListener('click', switchCamera);
+            retryCameraBtn.addEventListener('click', startCamera);
+
+            // Filtros
+            filterBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    setFilter(btn.dataset.filter);
+                });
+            });
+
+            // Temporizador Alternância (OFF -> 3s -> 5s -> 10s)
+            timerToggleBtn.addEventListener('click', () => {
+                if (state.timerDuration === 0) {
+                    state.timerDuration = 3;
+                    timerIconText.textContent = '3s';
+                } else if (state.timerDuration === 3) {
+                    state.timerDuration = 5;
+                    timerIconText.textContent = '5s';
+                } else if (state.timerDuration === 5) {
+                    state.timerDuration = 10;
+                    timerIconText.textContent = '10s';
+                } else {
+                    state.timerDuration = 0;
+                    timerIconText.textContent = 'OFF';
+                }
+                showToast(`Temporizador: ${state.timerDuration > 0 ? state.timerDuration + 's' : 'Desligado'}`);
+            });
+
+            // Som On/Off
+            soundBtn.addEventListener('click', () => {
+                state.soundEnabled = !state.soundEnabled;
+                soundIcon.className = state.soundEnabled ? 'fas fa-volume-up text-sm' : 'fas fa-volume-mute text-sm text-red-400';
+                showToast(state.soundEnabled ? "Som Ativado" : "Som Desativado");
+            });
+
+            // Grid Overlay Toggle
+            gridBtn.addEventListener('click', () => {
+                state.gridEnabled = !state.gridEnabled;
+                if (state.gridEnabled) {
+                    gridOverlay.classList.remove('hidden');
+                    gridOverlay.classList.add('grid');
+                    gridIcon.classList.remove('opacity-60');
+                    gridIcon.classList.add('text-yellow-400');
+                } else {
+                    gridOverlay.classList.add('hidden');
+                    gridOverlay.classList.remove('grid');
+                    gridIcon.classList.add('opacity-60');
+                    gridIcon.classList.remove('text-yellow-400');
+                }
+            });
+
+            // Alternar Modo Photobooth
+            boothModeBtn.addEventListener('click', () => {
+                state.photoboothMode = !state.photoboothMode;
+                if (state.photoboothMode) {
+                    boothModeBtn.classList.add('bg-red-600', 'border-red-500');
+                    showToast("Modo Fotobooth (4 fotos) Ativado!");
+                } else {
+                    boothModeBtn.classList.remove('bg-red-600', 'border-red-500');
+                    showToast("Modo Foto Normal Ativado");
+                }
+            });
+
+            // Galeria Modais
+            openGalleryBtn.addEventListener('click', () => {
+                galleryModal.classList.remove('translate-y-full');
+            });
+
+            closeGalleryBtn.addEventListener('click', () => {
+                galleryModal.classList.add('translate-y-full');
+            });
+
+            closeViewerBtn.addEventListener('click', closeViewer);
+            deletePhotoBtn.addEventListener('click', () => {
+                if (state.selectedPhotoId) {
+                    deletePhotoFromDB(state.selectedPhotoId);
+                }
+            });
+            downloadPhotoBtn.addEventListener('click', downloadCurrentPhoto);
+            sharePhotoBtn.addEventListener('click', shareCurrentPhoto);
+        }
+
+        // Inicialização na carga da página
+        window.addEventListener('load', async () => {
+            await initIndexedDB();
+            setupEventListeners();
+            startCamera();
+        });
+    </script>
+</body>
+</html>
+```
